@@ -98,7 +98,7 @@ jobs:
       - name: Retain tested image for download
         if: steps.pending.outputs.build == 'true' && github.event_name != 'pull_request'
         id: image
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: rpfm-server-${{ steps.plan.outputs.version }}-${{ steps.plan.outputs.rpfm_commit }}
           path: ${{ runner.temp }}/rpfm-server.tar.gz
@@ -111,7 +111,7 @@ jobs:
           test -s "$RUNNER_TEMP/rpfm-update.patch"
       - name: Retain update patch
         if: steps.plan.outputs.changed == 'true' && steps.pending.outputs.build == 'true' && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: rpfm-version-update
           path: ${{ runner.temp }}/rpfm-update.patch
