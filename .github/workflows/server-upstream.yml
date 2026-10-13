@@ -36,7 +36,7 @@ jobs:
       schema_commit: ${{ steps.plan.outputs.schema_commit }}
       image_artifact: ${{ steps.image.outputs.artifact-url }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Test release resolver and update rules
         run: python3 -m unittest discover -s server/tests -v
       - name: Fetch stable release and apply candidate pins
@@ -132,7 +132,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - uses: actions/download-artifact@v8.0.2
         with:
           name: rpfm-version-update

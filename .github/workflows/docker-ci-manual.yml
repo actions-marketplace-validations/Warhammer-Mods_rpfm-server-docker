@@ -46,7 +46,7 @@ jobs:
     steps:
         
     - name: Checkout upstream repository
-      uses: actions/checkout@v7
+      uses: actions/checkout@v7.0.1
       with:
         repository: ${{ env.UPSTREAM }}
         ref: ${{ github.event.inputs.tag }}
@@ -82,7 +82,7 @@ jobs:
           type=raw,value=SHA${{ steps.repo.outputs.sha }}
     
     - name: Checkout local repository
-      uses: actions/checkout@v7
+      uses: actions/checkout@v7.0.1
       with:
         path: docker
     
