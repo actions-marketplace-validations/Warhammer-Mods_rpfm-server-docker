@@ -1,6 +1,6 @@
 {
-  "version": "5.1.1",
-  "tag": "v5.1.1",
-  "rpfm_commit": "5204dab9e9a9376c438deabed8489de3bc319599",
-  "schema_commit": "5d841c5c2a73d27495c6fed7282dc011c5517e1c"
+  "version": "5.2.0",
+  "tag": "v5.2.0",
+  "rpfm_commit": "cbc9626d098dc645f40ba950be2d90c60ea94805",
+  "schema_commit": "19db98acbb8a05beb786996dc377abad07125e6c"
 }

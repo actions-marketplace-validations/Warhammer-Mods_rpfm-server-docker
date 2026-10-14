@@ -77,7 +77,7 @@ class Client:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:45127")
-    parser.add_argument("--expected-version", default="5.1.1")
+    parser.add_argument("--expected-version", default="5.2.0")
     parser.add_argument("--roundtrip", action="store_true",
                         help="Save/reopen a temporary pack under the mounted job workspace")
     args = parser.parse_args()
