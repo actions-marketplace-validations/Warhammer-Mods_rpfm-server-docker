@@ -81,6 +81,19 @@ def apply_update(root, current, candidate):
     smoke = (root / "server/smoke_test.py").read_text()
     replacements["server/smoke_test.py"] = replace_exact(
         smoke, 'default="' + current["version"] + '"', 'default="' + candidate["version"] + '"')
+    # README examples track the first Docker action release of each RPFM version.
+    # A pin-only update within the same version retains the current server revision.
+    for name, action in (("README.md", "Warhammer-Mods/rpfm-server-docker"),
+                         ("server/README.md", "Warhammer-Mods/rpfm-server-docker/server")):
+        text = (root / name).read_text()
+        pattern = re.compile(re.escape(action) + r"@v" + re.escape(current["version"])
+                             + r"-server\.([1-9][0-9]*)(?![\w.-])")
+        matches = list(pattern.finditer(text))
+        if len(matches) != 1:
+            raise ValueError(f"Expected one current release example in {name}; review changed file layout")
+        revision = matches[0][1] if candidate["version"] == current["version"] else "1"
+        ref = action + "@v" + candidate["version"] + "-server." + revision
+        replacements[name] = pattern.sub(lambda match: ref, text)
     replacements[MANIFEST] = json.dumps(candidate, indent=2) + "\n"
     for name, content in replacements.items():
         (root / name).write_text(content)

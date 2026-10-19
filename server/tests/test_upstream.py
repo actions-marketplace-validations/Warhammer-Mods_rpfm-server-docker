@@ -78,11 +78,41 @@ class UpdateTests(unittest.TestCase):
         upstream.apply_update(self.root, self.current, self.candidate)
         after = self.snapshot()
         changed = {p for p in before if before[p] != after[p]}
-        self.assertEqual(changed, {"server/Dockerfile", "server/compose.yaml", "server/smoke_test.py", upstream.MANIFEST})
+        self.assertEqual(changed, {"server/Dockerfile", "server/compose.yaml", "server/smoke_test.py", upstream.MANIFEST, "README.md", "server/README.md"})
         self.assertEqual(json.loads((self.root / upstream.MANIFEST).read_text()), self.candidate)
         docker = (self.root / "server/Dockerfile").read_text()
         self.assertEqual(docker.count("ARG RPFM_COMMIT=" + "a" * 40), 2)
         self.assertIn("37256097535", (self.root / "server/README.md").read_text())
+
+    def test_readme_examples_follow_new_version_and_preserve_other_text(self):
+        before = {name: (self.root / name).read_text()
+                  for name in ("README.md", "server/README.md")}
+        upstream.apply_update(self.root, self.current, self.candidate)
+        for name, text in before.items():
+            self.assertEqual((self.root / name).read_text(), text.replace(
+                "@v" + self.current["version"] + "-server.1", "@v5.1.2-server.1"))
+
+    def test_same_version_pin_update_preserves_server_revision(self):
+        for name in ("README.md", "server/README.md"):
+            path = self.root / name
+            path.write_text(path.read_text().replace("-server.1", "-server.3"))
+        candidate = {**self.current, "rpfm_commit": "a" * 40}
+        upstream.apply_update(self.root, self.current, candidate)
+        for name in ("README.md", "server/README.md"):
+            self.assertIn("@v" + self.current["version"] + "-server.3",
+                          (self.root / name).read_text())
+
+    def test_readme_layout_mismatch_does_not_partially_write(self):
+        for name in ("README.md", "server/README.md"):
+            with self.subTest(name=name):
+                path = self.root / name
+                original = path.read_text()
+                path.write_text(original.replace("-server.1", "-server.invalid"))
+                before = self.snapshot()
+                with self.assertRaises(ValueError):
+                    upstream.apply_update(self.root, self.current, self.candidate)
+                self.assertEqual(self.snapshot(), before)
+                path.write_text(original)
 
     def test_layout_mismatch_does_not_partially_write(self):
         path = self.root / "server/Dockerfile"

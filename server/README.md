@@ -66,8 +66,8 @@ do not require a full game installation.
 
 ## GitHub Actions
 
-The example follows `master`. Choose a published tag from [Releases](https://github.com/Warhammer-Mods/rpfm-server-docker/releases)
-or pin a full commit SHA for immutable builds.
+The example uses a published release tag. Pin a full commit SHA to lock the
+action source.
 
 Use the root composite action or the `/server` action on a Linux runner. It builds the
 pinned backend unless given a prebuilt image, waits for readiness, and mounts
@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: Warhammer-Mods/rpfm-server-docker/server@master
+      - uses: Warhammer-Mods/rpfm-server-docker/server@v5.2.0-server.1
         id: rpfm
       - name: Run your pack script
         env:
@@ -137,6 +137,10 @@ docker load --input rpfm-server.tar.gz
 The action's `image` input can use that loaded `local/rpfm-server:VERSION`
 image. This automation does not publish GHCR images or merge update PRs.
 Merging a version PR updates the default action build and Compose version.
+The same PR updates both README action examples to `vVERSION-server.1` for a
+new RPFM version; source/schema pin changes within a version retain the existing
+server revision. Publish that action tag separately after merging before using
+the new examples. The updater does not create tags or GitHub Releases.
 Existing workflows pinned to an older action commit continue to use that
 commit until you update their `uses:` reference.
 

@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: Warhammer-Mods/rpfm-server-docker@master
+      - uses: Warhammer-Mods/rpfm-server-docker@v5.2.0-server.1
         id: rpfm
       - name: Run your pack script
         env:
@@ -26,8 +26,8 @@ jobs:
         run: docker rm --force "$RPFM_CONTAINER"
 ```
 
-The example follows `master`. Choose a published tag from [Releases](https://github.com/Warhammer-Mods/rpfm-server-docker/releases)
-or pin a full commit SHA for immutable builds.
+The example uses a published release tag. Pin a full commit SHA to lock the
+action source.
 The bundled RPFM version and source pins are recorded in [server/upstream.json](server/upstream.json).
 `scripts/build_mod.py` is your own MCP client script; it is not included.
 See [the smoke test](server/smoke_test.py) for a Python standard-library MCP
