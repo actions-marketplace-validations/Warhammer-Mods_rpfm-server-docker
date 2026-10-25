@@ -68,12 +68,28 @@ class UpdateTests(unittest.TestCase):
         for name in ("action.yml", "README.md"):
             shutil.copy2(ROOT / name, self.root / name)
         self.current = json.loads((self.root / upstream.MANIFEST).read_text())
+        self.release = json.loads((self.root / "server/image.json").read_text())["release"]
         self.candidate = {"version": "5.1.2", "tag": "v5.1.2", "rpfm_commit": "a" * 40, "schema_commit": "b" * 40}
+
+    def fixture_at_revision(self, revision):
+        """Exercise arbitrary server revisions without depending on the checkout's release."""
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        shutil.copytree(self.root, root, dirs_exist_ok=True)
+        release = self.release.rsplit(".", 1)[0] + "." + str(revision)
+        for name in ("README.md", "server/README.md", "server/image.json", "server/compose.yaml"):
+            path = root / name
+            old, new = (self.release[1:], release[1:]) if name.endswith("compose.yaml") else (self.release, release)
+            text = path.read_text()
+            self.assertEqual(text.count(old), 1, name)
+            path.write_text(text.replace(old, new), newline="\n")
+        return root, release
 
     def snapshot(self):
         return {p.relative_to(self.root).as_posix(): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
 
-    def test_updates_only_version_pins_and_keeps_historical_validation(self):
+    def test_updates_version_pins_and_cloud_release_together(self):
         before = self.snapshot()
         upstream.apply_update(self.root, self.current, self.candidate)
         after = self.snapshot()
@@ -85,36 +101,59 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "server/image.json").read_text())["release"], "v5.1.2-server.1")
 
     def test_readme_examples_follow_new_version_and_preserve_other_text(self):
-        before = {name: (self.root / name).read_text()
-                  for name in ("README.md", "server/README.md")}
-        upstream.apply_update(self.root, self.current, self.candidate)
-        for name, text in before.items():
-            self.assertEqual((self.root / name).read_text(), text.replace(
-                "@v" + self.current["version"] + "-server.2", "@v5.1.2-server.1"))
+        for revision in (1, 2, 12):
+            with self.subTest(revision=revision):
+                root, release = self.fixture_at_revision(revision)
+                before = {name: (root / name).read_text()
+                          for name in ("README.md", "server/README.md")}
+                upstream.apply_update(root, self.current, self.candidate)
+                for name, text in before.items():
+                    self.assertEqual((root / name).read_text(), text.replace(
+                        "@" + release, "@" + self.candidate["tag"] + "-server.1"))
+                image_release = json.loads((root / "server/image.json").read_text())["release"]
+                self.assertEqual(image_release, self.candidate["tag"] + "-server.1")
+                self.assertIn(image_release[1:], (root / "server/compose.yaml").read_text())
 
     def test_same_version_pin_update_increments_server_revision(self):
-        for name in ("README.md", "server/README.md", "server/image.json", "server/compose.yaml"):
-            path = self.root / name
-            path.write_text(path.read_text().replace("-server.2", "-server.3"))
-        candidate = {**self.current, "rpfm_commit": "a" * 40}
-        upstream.apply_update(self.root, self.current, candidate)
-        for name in ("README.md", "server/README.md"):
-            self.assertIn("@v" + self.current["version"] + "-server.4",
-                          (self.root / name).read_text())
-        self.assertEqual(json.loads((self.root / "server/image.json").read_text())["release"],
-                         "v" + self.current["version"] + "-server.4")
+        for revision in (1, 2, 9, 12):
+            with self.subTest(revision=revision):
+                root, _ = self.fixture_at_revision(revision)
+                candidate = {**self.current, "rpfm_commit": "a" * 40}
+                upstream.apply_update(root, self.current, candidate)
+                expected = self.current["tag"] + "-server." + str(revision + 1)
+                for name in ("README.md", "server/README.md"):
+                    self.assertIn("@" + expected, (root / name).read_text())
+                self.assertEqual(json.loads((root / "server/image.json").read_text())["release"], expected)
+                self.assertIn(expected[1:], (root / "server/compose.yaml").read_text())
 
     def test_readme_layout_mismatch_does_not_partially_write(self):
         for name in ("README.md", "server/README.md"):
             with self.subTest(name=name):
                 path = self.root / name
                 original = path.read_text()
-                path.write_text(original.replace("-server.2", "-server.invalid"))
+                old = "@" + self.release
+                self.assertEqual(original.count(old), 1)
+                invalid = old.rsplit(".", 1)[0] + ".invalid"
+                path.write_text(original.replace(old, invalid), newline="\n")
                 before = self.snapshot()
                 with self.assertRaises(ValueError):
                     upstream.apply_update(self.root, self.current, self.candidate)
                 self.assertEqual(self.snapshot(), before)
-                path.write_text(original)
+                path.write_text(original, newline="\n")
+
+    def test_readme_revision_mismatch_does_not_partially_write(self):
+        for name in ("README.md", "server/README.md"):
+            with self.subTest(name=name):
+                path = self.root / name
+                original = path.read_text()
+                next_revision = int(self.release.rsplit(".", 1)[1]) + 1
+                mismatched = self.release.rsplit(".", 1)[0] + "." + str(next_revision)
+                path.write_text(original.replace("@" + self.release, "@" + mismatched), newline="\n")
+                before = self.snapshot()
+                with self.assertRaisesRegex(ValueError, "README and image release revisions differ"):
+                    upstream.apply_update(self.root, self.current, self.candidate)
+                self.assertEqual(self.snapshot(), before)
+                path.write_text(original, newline="\n")
 
     def test_layout_mismatch_does_not_partially_write(self):
         path = self.root / "server/Dockerfile"

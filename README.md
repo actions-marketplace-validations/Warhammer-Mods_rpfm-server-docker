@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: Warhammer-Mods/rpfm-server-docker@v5.3.1-server.2
+      - uses: Warhammer-Mods/rpfm-server-docker@v5.3.2-server.1
         id: rpfm
       - name: Run your pack script
         env:

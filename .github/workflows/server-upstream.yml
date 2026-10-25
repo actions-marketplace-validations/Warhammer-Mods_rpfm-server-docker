@@ -50,6 +50,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 server/upstream.py check --apply --output "$GITHUB_OUTPUT"
+      - name: Test the updated candidate pins before building or proposing a PR
+        run: python3 -m unittest discover -s server/tests -v
       - name: Avoid rebuilding an already proposed release
         id: pending
         env:
