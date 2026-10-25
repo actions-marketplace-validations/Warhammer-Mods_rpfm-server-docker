@@ -67,6 +67,14 @@ def replace_exact(text, old, new, count=1):
 def apply_update(root, current, candidate):
     """Prepare every replacement before writing; a layout error leaves files untouched."""
     replacements = {}
+    image = json.loads((root / "server/image.json").read_text())
+    release = image["release"]
+    match = re.fullmatch(r"v" + re.escape(current["version"]) + r"-server\.([1-9][0-9]*)", release)
+    if not match:
+        raise ValueError("Image release does not match current upstream pins")
+    revision = str(int(match[1]) + (candidate != current)) if candidate["version"] == current["version"] else "1"
+    image["release"] = "v" + candidate["version"] + "-server." + revision
+    replacements["server/image.json"] = json.dumps(image, indent=2) + "\n"
     docker = (root / "server/Dockerfile").read_text()
     docker = replace_exact(docker, "ARG RPFM_COMMIT=" + current["rpfm_commit"],
                            "ARG RPFM_COMMIT=" + candidate["rpfm_commit"], 2)
@@ -77,12 +85,11 @@ def apply_update(root, current, candidate):
     replacements["server/Dockerfile"] = docker
     compose = (root / "server/compose.yaml").read_text()
     replacements["server/compose.yaml"] = replace_exact(
-        compose, "local/rpfm-server:" + current["version"], "local/rpfm-server:" + candidate["version"])
+        compose, release[1:], image["release"][1:])
     smoke = (root / "server/smoke_test.py").read_text()
     replacements["server/smoke_test.py"] = replace_exact(
         smoke, 'default="' + current["version"] + '"', 'default="' + candidate["version"] + '"')
-    # README examples track the first Docker action release of each RPFM version.
-    # A pin-only update within the same version retains the current server revision.
+    # Each changed image needs a new release; published digests are not replaced.
     for name, action in (("README.md", "Warhammer-Mods/rpfm-server-docker"),
                          ("server/README.md", "Warhammer-Mods/rpfm-server-docker/server")):
         text = (root / name).read_text()
@@ -91,8 +98,9 @@ def apply_update(root, current, candidate):
         matches = list(pattern.finditer(text))
         if len(matches) != 1:
             raise ValueError(f"Expected one current release example in {name}; review changed file layout")
-        revision = matches[0][1] if candidate["version"] == current["version"] else "1"
-        ref = action + "@v" + candidate["version"] + "-server." + revision
+        if matches[0][1] != match[1]:
+            raise ValueError(f"README and image release revisions differ in {name}")
+        ref = action + "@" + image["release"]
         replacements[name] = pattern.sub(lambda match: ref, text)
     replacements[MANIFEST] = json.dumps(candidate, indent=2) + "\n"
     for name, content in replacements.items():

@@ -1,0 +1,6 @@
+services:
+  rpfm:
+    image: local/rpfm-server:source
+    build:
+      context: .
+      dockerfile: Dockerfile

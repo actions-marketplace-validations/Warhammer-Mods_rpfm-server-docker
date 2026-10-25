@@ -1,0 +1,167 @@
+name: Publish verified RPFM image
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, including a draft release (for example v5.3.1-server.2)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: rpfm-publish-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    if: github.repository == 'Warhammer-Mods/rpfm-server-docker' && (github.event_name == 'workflow_dispatch' || !github.event.release.prerelease)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      commit: ${{ steps.plan.outputs.commit }}
+      repository: ${{ steps.plan.outputs.repository }}
+      image_tag: ${{ steps.plan.outputs.image_tag }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the release and its trusted source
+        id: plan
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-server\.[1-9][0-9]*$ ]]
+          git merge-base --is-ancestor HEAD origin/master
+          gh release view "$RELEASE_TAG" --json isPrerelease --jq 'if .isPrerelease then error("Prereleases are not stable images") else . end'
+          python3 server/image.py plan --release "$RELEASE_TAG" --output "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ${{ needs.plan.outputs.repository }}
+      IMAGE_TAG: ${{ needs.plan.outputs.image_tag }}
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+      - name: Unit tests and release contract
+        run: python3 -m unittest discover -s server/tests -v
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Reuse a completed release without overwriting its digest
+        id: existing
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | grep -Fxq rpfm-image.json; then
+            gh release download "$RELEASE_TAG" --pattern rpfm-image.json --dir "$RUNNER_TEMP"
+            python3 server/image.py resolve --lock "$RUNNER_TEMP/rpfm-image.json"
+            digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["digest"])' "$RUNNER_TEMP/rpfm-image.json")
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            echo 'reuse=true' >> "$GITHUB_OUTPUT"
+          else
+            if docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" >/dev/null 2>&1; then
+              echo 'Release tag already exists without its lock asset. Recover the asset from the verified digest; do not overwrite the tag.' >&2
+              exit 1
+            fi
+            echo 'reuse=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build candidate with SBOM and provenance
+        id: build
+        if: steps.existing.outputs.reuse != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: server
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+          cache-from: type=gha,scope=rpfm-server
+          cache-to: type=gha,mode=max,scope=rpfm-server
+      - name: Resolve the candidate digest
+        id: candidate
+        env:
+          DIGEST: ${{ steps.existing.outputs.digest || steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE@$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Require anonymous access for consumers
+        env:
+          PULL_IMAGE: ${{ steps.candidate.outputs.image }}
+        run: |
+          # Newly created GHCR packages are private. An owner must make the
+          # package public once; rerun this workflow after that initial setup.
+          docker --config "$(mktemp -d "$RUNNER_TEMP/ghcr-anonymous.XXXXXX")" pull "$PULL_IMAGE"
+      - name: Start the downloaded image through the root action
+        id: rpfm
+        uses: ./
+        with:
+          image: ${{ steps.candidate.outputs.image }}
+      - name: Verify downloaded image, MCP, WH3 schemas and disk roundtrip
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: python3 server/smoke_test.py --expected-version "$VERSION" --roundtrip
+      - name: Attest the tested image with GitHub OIDC
+        if: steps.existing.outputs.reuse != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.candidate.outputs.digest }}
+          push-to-registry: true
+      - name: Promote the tested digest and attach its lock
+        if: steps.existing.outputs.reuse != 'true'
+        env:
+          DIGEST: ${{ steps.candidate.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Copy the complete OCI index, including SBOM/provenance, without rebuilding.
+          docker buildx imagetools create --tag "$IMAGE:$IMAGE_TAG" "$IMAGE@$DIGEST"
+          published=$(docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --format '{{json .Manifest.Digest}}' | python3 -c 'import json,sys; print(json.load(sys.stdin))')
+          test "$published" = "$DIGEST"
+          python3 server/image.py lock --digest "$DIGEST" --output "$RUNNER_TEMP/rpfm-image.json"
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/rpfm-image.json"
+      - name: Release image summary
+        env:
+          DIGEST: ${{ steps.candidate.outputs.digest }}
+        run: |
+          {
+            echo "### Verified RPFM image: $RELEASE_TAG"
+            echo "- Image: \`$IMAGE:$IMAGE_TAG\`"
+            echo "- Immutable reference: \`$IMAGE@$DIGEST\`"
+            echo '- Anonymous pull, startup, MCP, WH3 schemas and pack roundtrip passed.'
+            echo '- SBOM, build provenance and GitHub attestation accompany the image.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Container logs and cleanup
+        if: always() && steps.rpfm.outputs.container != ''
+        env:
+          RPFM_CONTAINER: ${{ steps.rpfm.outputs.container }}
+        run: |
+          docker logs "$RPFM_CONTAINER" || true
+          docker rm --force "$RPFM_CONTAINER" || true

@@ -1,19 +1,18 @@
 # RPFM Server in Docker
 
-Start **RPFM Server** in GitHub Actions for Total War packfile operations over
-Streamable HTTP MCP or WebSocket. The action runs on Linux runners with Docker,
-mounts your checkout at `/work`, and builds the pinned backend unless you supply
-a prebuilt image.
+Run the headless RPFM backend in GitHub Actions with MCP and WebSocket access.
+Release images are built once, tested, and stored in GitHub Container Registry.
+Consumer jobs download the verified image instead of compiling Rust.
 
 ## GitHub Actions
 
 ```yaml
 jobs:
   mod-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: Warhammer-Mods/rpfm-server-docker@v5.3.0-server.1
+      - uses: Warhammer-Mods/rpfm-server-docker@v5.3.1-server.2
         id: rpfm
       - name: Run your pack script
         env:
@@ -26,38 +25,51 @@ jobs:
         run: docker rm --force "$RPFM_CONTAINER"
 ```
 
-The example uses a published release tag. Pin a full commit SHA to lock the
-action source.
-The bundled RPFM version and source pins are recorded in [server/upstream.json](server/upstream.json).
-`scripts/build_mod.py` is your own MCP client script; it is not included.
-See [the smoke test](server/smoke_test.py) for a Python standard-library MCP
-client example.
+`scripts/build_mod.py` is your own MCP client script. See the bundled
+[stdlib example](server/smoke_test.py). For a full source pin, replace the
+action tag with its commit SHA.
 
-Inputs: `image` (optional prebuilt Docker image) and `port` (default `45127`).
-Outputs: `url`, `mcp-url` and `container`. Remove the container in an `always()`
-cleanup step. The desktop GUI and former CLI arguments are not provided.
+The default image is resolved from the selected release's `rpfm-image.json`
+asset, checked against the bundled RPFM/schema pins and build inputs, then
+pulled and run by its exact OCI digest. No registry login is needed for the
+public image. Missing release metadata fails with a clear error; it never
+silently starts an expensive source build.
 
-See [the server guide](server/README.md) for Docker Compose, schemas, pack paths,
-client usage, CI validation and automatic stable-release builds. New releases
-are checked twice daily, built and tested before an update PR is opened.
+| Input | Default | Purpose |
+| --- | --- | --- |
+| `image` | Release image digest | Override with a registry reference or a local image. |
+| `build-from-source` | `false` | Explicitly compile the bundled Dockerfile. Mutually exclusive with `image`. |
+| `port` | `45127` | Localhost port, from 1024 to 65535. |
 
-## Repository rename
+Outputs: `url`, `mcp-url`, `container`, and the actual `image` reference.
+The job workspace is mounted at `/work`. Remove the container in an
+`always()` cleanup step. Published images support Linux x86-64.
 
-The repository is now `Warhammer-Mods/rpfm-server-docker`. Update existing
-workflow `uses:` references from `Warhammer-Mods/rpfm_cli-docker` to the new
-name, keeping the same subdirectory and tag or commit. GitHub Actions does
-not follow repository-name redirects. The historical CLI image remains at
-`ghcr.io/warhammer-mods/rpfm_cli-docker:develop`.
+## Docker Compose
 
-## Migration from the legacy CLI
+```sh
+cd server
+docker compose pull
+docker compose up -d
+```
 
-The root action now starts RPFM Server. Replace the former `game`, `options`,
-`subcommand` and `run` inputs with a script using MCP or WebSocket.
-The `/server` action remains available with the same server interface.
-The historical CLI action is preserved at `/legacy`; older tags and pinned
-commits keep their original behavior. Its existing container image is unchanged.
-The root Dockerfile is also historical; the current server Dockerfile is under
-`server/`.
+For a local source build instead:
 
-All credit for RPFM goes to [Frodo45127](https://github.com/Frodo45127/rpfm) and
-[RPFM's contributors](https://github.com/Frodo45127/rpfm/graphs/contributors).
+```sh
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+```
+
+See the [server guide](server/README.md) for MCP API v2, paths, persistent
+schemas, custom images and source builds. The [release guide](docs/RELEASING.md)
+explains GHCR publication, SBOM, provenance, signed attestations and recovery.
+
+## Compatibility
+
+The root action and `/server` action both start RPFM Server. RPFM 5.3 uses
+server API v2; scripts written for 5.2 must migrate tool names and results.
+The desktop GUI and former CLI arguments are not provided. The historical
+CLI action remains at `/legacy`; old tags retain their original behavior.
+The root Dockerfile is historical; the current backend is built from `server/`.
+
+All credit for RPFM goes to [Frodo45127](https://github.com/Frodo45127/rpfm)
+and [RPFM's contributors](https://github.com/Frodo45127/rpfm/graphs/contributors).

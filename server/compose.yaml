@@ -1,9 +1,7 @@
 services:
   rpfm:
-    image: local/rpfm-server:5.3.0
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${RPFM_IMAGE:-ghcr.io/warhammer-mods/rpfm-server-docker:5.3.1-server.2}
+    platform: linux/amd64
     ports:
       - "127.0.0.1:45127:45128"
     volumes:

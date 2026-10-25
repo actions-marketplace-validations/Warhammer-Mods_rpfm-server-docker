@@ -1,0 +1,5 @@
+{
+  "repository": "ghcr.io/warhammer-mods/rpfm-server-docker",
+  "release": "v5.3.1-server.2",
+  "platform": "linux/amd64"
+}

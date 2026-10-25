@@ -1,13 +1,17 @@
 name: RPFM Server
-description: Start RPFM Server for pack operations over MCP or WebSocket in a Linux Actions job.
+description: Download and start a verified RPFM Server image for MCP and WebSocket pack operations.
 branding:
   icon: 'package'
   color: 'orange'
 inputs:
   image:
-    description: Optional prebuilt image. If empty, build the bundled pinned Dockerfile.
+    description: Optional custom registry image or local image. Defaults to the release's verified GHCR digest.
     required: false
     default: ''
+  build-from-source:
+    description: Build the bundled Dockerfile instead of downloading the release image.
+    required: false
+    default: 'false'
   port:
     description: Localhost port on the runner.
     required: false
@@ -22,59 +26,18 @@ outputs:
   container:
     description: Container name; remove it in an always() cleanup step.
     value: ${{ steps.start.outputs.container }}
+  image:
+    description: Image reference used to start this job (a digest for the default GHCR path).
+    value: ${{ steps.start.outputs.image }}
 runs:
   using: composite
   steps:
-    - name: Build or start the RPFM backend
+    - name: Download or build and start RPFM
       id: start
       shell: bash
       env:
         RPFM_ACTION_PATH: ${{ github.action_path }}
         RPFM_INPUT_IMAGE: ${{ inputs.image }}
+        RPFM_BUILD_FROM_SOURCE: ${{ inputs.build-from-source }}
         RPFM_INPUT_PORT: ${{ inputs.port }}
-      run: |
-        set -euo pipefail
-        if [[ "${RUNNER_OS}" != Linux ]]; then
-          echo 'RPFM Server action requires a Linux runner with Docker.' >&2
-          exit 1
-        fi
-        if [[ ! "${RPFM_INPUT_PORT}" =~ ^[0-9]{1,5}$ ]] || (( 10#${RPFM_INPUT_PORT} < 1024 || 10#${RPFM_INPUT_PORT} > 65535 )); then
-          echo 'port must be an integer from 1024 to 65535' >&2
-          exit 1
-        fi
-        name="rpfm-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}"
-        image="${RPFM_INPUT_IMAGE}"
-        if [[ -z "${image}" ]]; then
-          version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "${RPFM_ACTION_PATH}/upstream.json")
-          image="local/${name}:${version}"
-          docker build --tag "${image}" "${RPFM_ACTION_PATH}"
-        fi
-        config=$(mktemp -d "${RUNNER_TEMP}/rpfm-config.XXXXXX")
-        url="http://127.0.0.1:${RPFM_INPUT_PORT}"
-        docker run --detach --name "${name}" \
-          --user "$(id -u):$(id -g)" \
-          --env HOME=/tmp \
-          --publish "127.0.0.1:${RPFM_INPUT_PORT}:45128" \
-          --volume "${config}:/config" \
-          --volume "${GITHUB_WORKSPACE}:/work" \
-          "${image}"
-        echo "container=${name}" >> "${GITHUB_OUTPUT}"
-        echo "url=${url}" >> "${GITHUB_OUTPUT}"
-        echo "mcp-url=${url}/mcp" >> "${GITHUB_OUTPUT}"
-        ready=false
-        for attempt in {1..60}; do
-          if curl --fail --silent "${url}/version" > /dev/null; then
-            ready=true
-            break
-          fi
-          if [[ "$(docker inspect --format '{{.State.Running}}' "${name}")" != true ]]; then
-            break
-          fi
-          sleep 1
-        done
-        if [[ "${ready}" != true ]]; then
-          docker logs "${name}" >&2
-          docker rm --force "${name}"
-          exit 1
-        fi
-        curl --fail --silent "${url}/version"
+      run: bash "${RPFM_ACTION_PATH}/start.sh"

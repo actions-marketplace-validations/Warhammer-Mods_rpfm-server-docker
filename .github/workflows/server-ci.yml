@@ -6,23 +6,44 @@ on:
       - 'action.yml'
       - 'README.md'
       - '.github/workflows/server-ci.yml'
+      - '.github/workflows/server-publish.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  workflow-lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate GitHub workflow syntax with pinned actionlint
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --location --retry 3 --output "$archive" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -shellcheck= -pyflakes=
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Test upstream update tooling
         run: python3 -m unittest discover -s server/tests -v
+      - name: Check shell and Compose configuration
+        run: |
+          bash -n server/start.sh server/entrypoint.sh
+          docker compose -f server/compose.yaml config --quiet
+          docker compose -f server/compose.yaml -f server/compose.build.yaml config --quiet
       - name: Read pinned version
         id: version
         run: python3 server/upstream.py version --output "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build the server image (without publishing)
-        uses: docker/build-push-action@v7.4.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: server
           load: true
@@ -49,19 +70,20 @@ jobs:
           fi
 
   bundled-root-action:
-    name: Root action without a prebuilt image
+    name: Root action with explicit source build
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Read pinned version
         id: version
         run: python3 server/upstream.py version --output "$GITHUB_OUTPUT"
-      # Deliberately omit `with.image` and any separate image build. This must
-      # exercise the root action's manifest lookup and bundled Docker context.
+      # Development refs need not have a published release image yet.
       - name: Build and start through the root action
         id: rpfm
         uses: ./
+        with:
+          build-from-source: 'true'
       - name: Verify the default-built server and pack disk roundtrip
         env:
           RPFM_URL: ${{ steps.rpfm.outputs.url }}
