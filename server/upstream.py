@@ -96,7 +96,7 @@ def apply_update(root, current, candidate):
         replacements[name] = pattern.sub(lambda match: ref, text)
     replacements[MANIFEST] = json.dumps(candidate, indent=2) + "\n"
     for name, content in replacements.items():
-        (root / name).write_text(content)
+        (root / name).write_text(content, newline="\n")
 
 
 def outputs(values, filename):

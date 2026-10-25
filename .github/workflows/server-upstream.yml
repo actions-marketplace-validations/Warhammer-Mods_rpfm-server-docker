@@ -15,6 +15,9 @@ on:
       - 'README.md'
       - 'server/upstream.py'
       - 'server/upstream.json'
+      - 'server/Dockerfile'
+      - 'server/smoke_test.py'
+      - 'server/README.md'
       - 'server/tests/**'
 permissions:
   contents: read

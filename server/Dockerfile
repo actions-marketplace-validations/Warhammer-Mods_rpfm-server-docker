@@ -2,8 +2,8 @@
 # Headless RPFM backend. The existing root Dockerfile remains the legacy CLI.
 ARG RUST_IMAGE=rust:bookworm
 FROM ${RUST_IMAGE} AS builder
-ARG RPFM_COMMIT=cbc9626d098dc645f40ba950be2d90c60ea94805
-ARG SCHEMA_COMMIT=19db98acbb8a05beb786996dc377abad07125e6c
+ARG RPFM_COMMIT=1a5f7d5577aa6b321401be33290f5409f0fc09d3
+ARG SCHEMA_COMMIT=29024e92f634c1da38c845c064bdcb0fd6492f67
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git pkg-config cmake clang libclang-dev \
     libssl-dev libdbus-1-dev libsecret-1-dev \
@@ -30,9 +30,9 @@ RUN git init /out/schemas \
     && test "$(git -C /out/schemas rev-parse HEAD)" = "${SCHEMA_COMMIT}"
 
 FROM debian:bookworm-slim AS runtime
-ARG RPFM_COMMIT=cbc9626d098dc645f40ba950be2d90c60ea94805
+ARG RPFM_COMMIT=1a5f7d5577aa6b321401be33290f5409f0fc09d3
 LABEL org.opencontainers.image.title="RPFM Server" \
-    org.opencontainers.image.version="5.2.0" \
+    org.opencontainers.image.version="5.3.0" \
     org.opencontainers.image.source="https://github.com/Warhammer-Mods/rpfm-server-docker" \
     org.opencontainers.image.revision="${RPFM_COMMIT}" \
     org.opencontainers.image.licenses="MIT"

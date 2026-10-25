@@ -71,7 +71,7 @@ class UpdateTests(unittest.TestCase):
         self.candidate = {"version": "5.1.2", "tag": "v5.1.2", "rpfm_commit": "a" * 40, "schema_commit": "b" * 40}
 
     def snapshot(self):
-        return {str(p.relative_to(self.root)): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        return {p.relative_to(self.root).as_posix(): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
 
     def test_updates_only_version_pins_and_keeps_historical_validation(self):
         before = self.snapshot()

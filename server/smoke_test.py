@@ -71,13 +71,68 @@ class Client:
                     continue
                 if isinstance(value, dict) and ("Error" in value or "error" in value):
                     raise AssertionError(f"{name}: {value}")
-        return result
+        if "structuredContent" in result:
+            return result["structuredContent"]
+        for block in result.get("content", []):
+            if block.get("type") == "text":
+                try:
+                    return json.loads(block["text"])
+                except json.JSONDecodeError:
+                    continue
+        raise AssertionError(f"{name}: No structured tool result: {result}")
+
+    def job(self, name, arguments=None, timeout=180):
+        """API v2 slow tools return job states, even when already finished."""
+        deadline = time.monotonic() + timeout
+        status = self.tool(name, arguments)
+        while status["state"] in {"queued", "running"}:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AssertionError(f"{name}: Job timed out: {status}")
+            status = self.tool("wait_for_job", {
+                "job": status["job"], "timeout_secs": min(30, max(1, int(remaining)))})
+        if status["state"] != "finished":
+            raise AssertionError(f"{name}: Job did not finish successfully: {status}")
+        return status["result"]
+
+
+def check_pack_lifecycle(client, roundtrip=False):
+    client.job("set_game", {"game": "warhammer_3", "rebuild_dependencies": False})
+    status = client.tool("session_status")
+    assert status["game"] == "warhammer_3" and status["schema_loaded"], status
+    tables = client.tool("schema_tables", {"prefix": "twad_key_deletes"})
+    assert tables["tables"].get("twad_key_deletes_tables"), tables
+    before = {pack["key"] for pack in status["packs"]}
+    created = client.tool("new_pack")
+    pack_key = created["key"]
+    try:
+        after = {pack["key"] for pack in client.tool("session_status")["packs"]}
+        assert after == before | {pack_key} and pack_key not in before, after
+        if roundtrip:
+            with tempfile.TemporaryDirectory(prefix=".rpfm-smoke-", dir=Path.cwd()) as folder:
+                path = Path(folder) / "smoke.pack"
+                container_path = "/work/" + Path(folder).name + "/smoke.pack"
+                saved = client.tool("save_pack", {"pack": pack_key, "path": container_path})
+                assert saved["key"] == pack_key and saved["path"] == container_path, saved
+                assert path.read_bytes().startswith(b"PFH"), "Missing pack header"
+                client.tool("close_pack", {"pack": pack_key})
+                reopened = client.tool("open_pack", {"paths": [container_path]})
+                pack_key = reopened["key"]
+                assert reopened["path"] == container_path and reopened["file_count"] == 0, reopened
+                # Close before removing the file, including on Windows hosts.
+                client.tool("close_pack", {"pack": pack_key})
+                pack_key = None
+    finally:
+        if pack_key is not None:
+            client.tool("close_pack", {"pack": pack_key})
+    remaining = {pack["key"] for pack in client.tool("session_status")["packs"]}
+    assert remaining == before, remaining
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:45127")
-    parser.add_argument("--expected-version", default="5.2.0")
+    parser.add_argument("--expected-version", default="5.3.0")
     parser.add_argument("--roundtrip", action="store_true",
                         help="Save/reopen a temporary pack under the mounted job workspace")
     args = parser.parse_args()
@@ -109,29 +164,10 @@ def main():
         if not cursor:
             break
     names = {tool["name"] for tool in tools}
-    assert {"set_game_selected", "new_pack", "list_open_packs",
-            "close_all_packs", "get_custom_table_list"} <= names, names
-    client.tool("set_game_selected", {"game_name": "warhammer_3",
-                                       "rebuild_dependencies": False})
-    tables = client.tool("get_custom_table_list")
-    # This API lists only custom start_pos_/twad_ tables, not regular DB tables.
-    assert "twad_key_deletes_tables" in json.dumps(tables), tables
-    before = client.tool("list_open_packs")
-    created = client.tool("new_pack")
-    after = client.tool("list_open_packs")
-    assert after != before, "New pack did not appear in this session"
-    if args.roundtrip:
-        response = json.loads(next(block["text"] for block in created["content"]
-                                   if block.get("type") == "text"))
-        pack_key = response["String"]
-        with tempfile.TemporaryDirectory(prefix=".rpfm-smoke-", dir=Path.cwd()) as folder:
-            path = Path(folder) / "smoke.pack"
-            container_path = "/work/" + Path(folder).name + "/smoke.pack"
-            client.tool("save_pack_as", {"pack_key": pack_key, "path": container_path})
-            assert path.read_bytes().startswith(b"PFH"), "Missing pack header"
-            client.tool("close_all_packs")
-            client.tool("open_packfiles", {"paths": [container_path]})
-    client.tool("close_all_packs")
+    required = {"set_game", "new_pack", "session_status", "schema_tables",
+                "wait_for_job", "save_pack", "open_pack", "close_pack"}
+    assert required <= names, f"Missing API v2 tools: {required - names}"
+    check_pack_lifecycle(client, args.roundtrip)
     print(f"PASS: RPFM {version['version']}, HTTP, MCP ({len(tools)} tools), "
           "WH3 schema and pack lifecycle" + (", disk roundtrip" if args.roundtrip else ""))
 

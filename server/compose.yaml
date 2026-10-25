@@ -1,6 +1,6 @@
 services:
   rpfm:
-    image: local/rpfm-server:5.2.0
+    image: local/rpfm-server:5.3.0
     build:
       context: .
       dockerfile: Dockerfile

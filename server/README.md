@@ -47,10 +47,16 @@ Copy-Item 'C:\Mods\example.pack' '.\work\example.pack'
 - WebSocket: `ws://127.0.0.1:45127/ws`
 - Server version: `http://127.0.0.1:45127/version`
 
-An MCP client can call `set_game_selected` with
-`{"game_name":"warhammer_3","rebuild_dependencies":false}`, then
-`open_packfiles` with `{"paths":["/work/example.pack"]}`. Inspect the tool's
-input schema in your client for additional optional parameters.
+RPFM 5.3 uses server API v2. An MCP client can call `set_game` with
+`{"game":"warhammer_3","rebuild_dependencies":false}`, then `open_pack` with
+`{"paths":["/work/example.pack"]}`. Tools return `structuredContent`; pack
+operations use the returned `key` as the `pack` argument. `save_pack` accepts
+an optional `path` for Save As, and `session_status` lists open packs.
+Slow tools such as `set_game` return a job state: if it is still running,
+call `wait_for_job` with its `job` ID until it finishes, then read `result`.
+Inspect `tools/list` for input/output schemas and the
+[API v2 reference](https://github.com/Frodo45127/rpfm/blob/v5.3.0/docs/server/mcp.md).
+Clients written for 5.2 must migrate the old method names and response wrappers.
 
 The port is published on the host's **localhost only**. Upstream has no
 authentication here. Keep this binding when using the container locally.
@@ -59,7 +65,8 @@ This does not automatically connect the container to ChatGPT.
 For dependency diagnostics against vanilla files, mount your game's data
 directory read-only, e.g. add a Compose volume
 `"C:/Games/Total War WARHAMMER III/data:/game/data:ro"`. Then configure the
-game paths via the server's settings tools using `/game/...` paths; some
+game paths in `/config/rpfm/settings.json` before starting the server, using
+`/game/...` paths, or configure a WebSocket session with `session.configure`; some
 operations also require the game executable or Assembly Kit files. Those
 files are not included in the image. Ordinary pack inspection and editing
 do not require a full game installation.
@@ -81,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: Warhammer-Mods/rpfm-server-docker/server@v5.2.0-server.1
+      - uses: Warhammer-Mods/rpfm-server-docker/server@v5.3.0-server.1
         id: rpfm
       - name: Run your pack script
         env:
@@ -164,7 +171,8 @@ python3 smoke_test.py
 On Windows, `py smoke_test.py` is an alternative. The test checks the exact
 server version, HTTP endpoints, MCP initialization/tool discovery, WH3 schema
 loading and creation/listing/closure of an empty in-memory pack. It does not
-save files or touch existing packs. The GitHub Actions workflow builds the
+save files. MCP clients share the selected game and open packs, so run the
+test against an isolated server; it selects WH3 but closes only its own pack. The GitHub Actions workflow builds the
 image and additionally uses `--roundtrip` to save and reopen a temporary pack
 under the mounted job workspace, checking container-to-host file permissions.
 The temporary directory is removed afterward. It never publishes an image.
@@ -200,8 +208,10 @@ that listener. Compose maps host localhost port 45127 to container port 45128.
 Compose restarts the service if either process exits, including RPFM's normal
 shutdown after its last WebSocket session expires.
 
-The server and desktop UI have separate client sessions. Connecting another
-client does not expose packs already opened in a different session.
+All MCP clients share one session and see the same selected game and open
+packs. WebSocket clients (including the desktop UI) use separate sessions.
+An idle MCP session is removed after five minutes only when it has no open
+packs or unfinished jobs.
 This container has no Qt desktop interface, browser interface, or remote desktop.
 
 ## Validation status
