@@ -29,7 +29,7 @@ volume. Ports are bound to host localhost only.
 ## GitHub Actions
 
 ```yaml
-- uses: Warhammer-Mods/rpfm-server-docker/server@v5.3.2-server.1
+- uses: Warhammer-Mods/rpfm-server-docker/server@v5.3.3-server.1
   id: rpfm
 ```
 

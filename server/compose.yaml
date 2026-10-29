@@ -1,6 +1,6 @@
 services:
   rpfm:
-    image: ${RPFM_IMAGE:-ghcr.io/warhammer-mods/rpfm-server-docker:5.3.2-server.1}
+    image: ${RPFM_IMAGE:-ghcr.io/warhammer-mods/rpfm-server-docker:5.3.3-server.1}
     platform: linux/amd64
     ports:
       - "127.0.0.1:45127:45128"
